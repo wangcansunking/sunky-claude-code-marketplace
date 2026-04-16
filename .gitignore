@@ -5,3 +5,6 @@ package-lock.json
 *.log
 .DS_Store
 Thumbs.db
+
+# Per-session scratch/temp files (global rule)
+cc-history/
