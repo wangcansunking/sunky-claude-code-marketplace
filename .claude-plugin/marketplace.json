@@ -20,6 +20,26 @@
         "interactive-html",
         "code-review"
       ]
+    },
+    {
+      "name": "claude-config-manager",
+      "description": "Dashboard & CLI for managing Claude Code configurations — profiles, export/import, MCP store, plugin marketplace, sessions viewer. 9 MCP tools, web dashboard, real-time sync.",
+      "version": "1.0.0-draft",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/wangcansunking/claude-config-manager.git"
+      },
+      "category": "configuration",
+      "homepage": "https://github.com/wangcansunking/claude-config-manager",
+      "tags": [
+        "configuration",
+        "dashboard",
+        "profiles",
+        "export-import",
+        "mcp-store",
+        "plugin-marketplace",
+        "sessions"
+      ]
     }
   ]
 }
