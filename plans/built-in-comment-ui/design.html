@@ -76,13 +76,6 @@ a:hover { text-decoration: underline; }
 
 .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.2rem; }
 
-/* Breadcrumb — inline at top of content, plain text (Linear / Notion style) */
-.ph-breadcrumb { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--muted); margin-bottom: 1rem; flex-wrap: wrap; }
-.ph-breadcrumb a { color: var(--muted); text-decoration: none; transition: color 0.15s; white-space: nowrap; }
-.ph-breadcrumb a:hover { color: var(--accent); }
-.ph-breadcrumb .sep { color: var(--muted); opacity: 0.4; font-size: 0.9em; }
-.ph-breadcrumb .current { color: var(--text); font-weight: 510; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24rem; }
-
 /* Plan tabs — horizontal row of sibling plan documents, at top of content */
 .plan-tabs { display: flex; gap: 0.15rem; border-bottom: 1px solid var(--border); margin-bottom: 1.8rem; overflow-x: auto; scrollbar-width: none; }
 .plan-tabs::-webkit-scrollbar { display: none; }
@@ -269,7 +262,7 @@ kbd {
 /* Print */
 @media print {
   body { padding-left: 0; padding-top: 0; background: #fff; color: #000; }
-  .side-nav, .theme-toggle, .ph-breadcrumb { display: none !important; }
+  .side-nav, .theme-toggle { display: none !important; }
   .container { max-width: 100%; padding: 0; }
   details { border-color: #ccc; background: #fff; }
   details > .body { display: block !important; }
