@@ -130,7 +130,8 @@ a:hover { text-decoration: underline; }
 .plan-files a.active .dot { background: var(--accent); }
 .plan-files a.upcoming .dot { background: transparent; border: 1px solid var(--muted); }
 
-.section-nav { padding: 0.6rem 0; overflow-y: auto; flex: 1; }
+.section-nav { padding: 4rem 0 0.6rem; overflow-y: auto; flex: 1; }
+.section-nav .group-label + a { margin-top: 0.15rem; }
 .section-nav .group-label {
   font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--muted); padding: 0.3rem 1rem 0.3rem;
@@ -290,11 +291,6 @@ kbd {
 </button>
 
 <nav class="side-nav" aria-label="Plan navigation">
-  <div class="nav-head">
-    <div class="nav-title">built-in-comment-ui</div>
-    <div class="nav-sub">Design Round</div>
-  </div>
-
   <div class="section-nav" aria-label="Sections">
     <div class="group-label">On this page</div>
     <a href="#executive-summary">1. Executive Summary</a>
