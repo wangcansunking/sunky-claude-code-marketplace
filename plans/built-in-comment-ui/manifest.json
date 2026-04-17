@@ -1,0 +1,13 @@
+{
+  "scenario": "built-in-comment-ui",
+  "displayName": "built-in-comment-ui",
+  "description": "Add a text-selection-based comment UI to the plan-harness HTML dashboard. Reviewers highlight text in any rendered plan document and leave comments Word-style, stored as JSONL on the host filesystem and attributed to the logged-in reviewer. Requires stable deterministic section IDs in generated HTML as a prerequisite. Establishes the built-in collaboration layer that removes dependence on external tools.",
+  "workItem": "",
+  "createdAt": "2026-04-17T02:34:11.422Z",
+  "tags": [
+    "collaboration",
+    "frontend",
+    "p0"
+  ],
+  "status": "draft"
+}

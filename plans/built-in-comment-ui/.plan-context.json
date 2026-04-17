@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "createdAt": "2026-04-17T02:34:11.422Z",
+  "repoRoot": "C:/repos/canwa-claude-plugins",
+  "repoName": "canwa-claude-plugins",
+  "scenarioPath": "C:/repos/canwa-claude-plugins/plans/built-in-comment-ui",
+  "scenarioName": "built-in-comment-ui",
+  "description": "Add a text-selection-based comment UI to the plan-harness HTML dashboard. Reviewers highlight text in any rendered plan document and leave comments Word-style, stored as JSONL on the host filesystem and attributed to the logged-in reviewer. Requires stable deterministic section IDs in generated HTML as a prerequisite. Establishes the built-in collaboration layer that removes dependence on external tools.",
+  "workItem": "",
+  "tags": ["collaboration", "frontend", "p0"],
+  "codebaseContext": {
+    "projectType": "Node.js (Claude Code plugin marketplace)",
+    "techStack": [
+      "Node.js",
+      "@modelcontextprotocol/sdk",
+      "esbuild",
+      "vanilla HTML/CSS/JS (no framework)",
+      "node:http (stdlib-only dashboard server)",
+      "node:crypto (HMAC, timingSafeEqual, randomBytes)"
+    ],
+    "patterns": [
+      "Plugin-per-top-level-directory (each plugin = one folder with .claude-plugin/plugin.json)",
+      "MCP server over stdio — stdout reserved for JSON-RPC, logs to stderr",
+      "Pre-built single-file dist bundle shipped in repo; end users never npm install",
+      "Self-contained HTML output with inline CSS/JS, CSS custom-prop theming",
+      "Plans live in the target repo (not in this plugin repo) under plans/<scenario>/",
+      "Scenario state is read from filesystem; no database"
+    ],
+    "conventions": [
+      "MCP logging goes to stderr via console.error",
+      "Templates use CSS variables and [data-theme] attribute for dark/light",
+      "Start.js launches from dist/index.js (no runtime install)",
+      "Cross-platform: no Windows-only code, path.sep / pathToFileURL everywhere",
+      "Public plugin — no Microsoft/CodeBlend-tied tooling or co-author attribution",
+      "Write concise code — minimal comments, default to no comments",
+      "Loopback requests bypass auth; only remote (tunneled) viewers need to log in"
+    ],
+    "structure": {
+      "topLevel": [
+        { "name": ".claude-plugin", "isDir": true },
+        { "name": "plan-harness", "isDir": true },
+        { "name": "CLAUDE.md", "isDir": false },
+        { "name": "README.md", "isDir": false },
+        { "name": "ROADMAP.md", "isDir": false }
+      ],
+      "readmeSummary": "Personal Claude Code plugin marketplace."
+    }
+  },
+  "inherited": {
+    "selfDevelopment": {
+      "note": "This scenario is planning plan-harness itself. The plugin being edited IS the plugin running the planning. This creates constraints that downstream agents must respect.",
+      "constraints": [
+        "Claude Code loads the plugin from a per-user cache (~/.claude/plugins/cache/canwa-claude-plugins/plan-harness/<version>/), not from this repo directly. Edits to repo source have no effect until sync'd.",
+        "Dev loop: edit src → `npm run dev` (builds dist + syncs to cache) → restart Claude Code.",
+        "The MCP server is a long-running stdio process; new bundles only load at Claude Code startup.",
+        "Skill/prompt edits (markdown-only) still need `npm run sync` + CC restart to take effect.",
+        "Generated plan documents land in <repoRoot>/plans/built-in-comment-ui/ (i.e., inside this same repo). Decide per-scenario whether to commit them.",
+        "HTML templates currently live in local-proxy/src/templates/base.js — changes there are what this scenario implements. After implementing, future plan runs will benefit (self-improving loop)."
+      ],
+      "docs": "plan-harness/DEVELOPMENT.md",
+      "scripts": {
+        "npm run build": "esbuild src → dist/index.js",
+        "npm run sync": "copy working copy into plugin cache",
+        "npm run dev": "build + sync (most common)"
+      }
+    },
+    "roadmap": {
+      "sourceFile": "plan-harness/ROADMAP.md",
+      "relevantSections": [
+        "Collaboration Architecture — core vs adapters",
+        "Text-Selection Comment Design (sketch)",
+        "Feature Backlog > Now > Stable section IDs",
+        "Feature Backlog > High leverage > Text-selection comment UI"
+      ],
+      "designDecisions": [
+        "HTML remains source of truth (not markdown) — charts/images/interactivity don't survive markdown",
+        "Built-in comment UI + external adapter exports (not PR-review-of-plans)",
+        "Comments anchor via W3C TextQuoteSelector (exact + prefix + suffix) for regen resilience",
+        "Section IDs are deterministic hash of title + parent path — needed for both anchoring and re-anchoring after regen",
+        "JSONL append-only storage at plans/<scenario>/.comments/<doc>.jsonl",
+        "Reviewer identity set on login (password + name), attached server-side to comments (never client-supplied)",
+        "Rejected better-auth — DB-backed, overkill for ephemeral per-share password. Built minimal auth.js (~160 LoC)"
+      ],
+      "openQuestions": [
+        "Real-time sync across simultaneous reviewers (polling vs WebSocket)?",
+        "Resolve semantics: collapse thread or just flag?",
+        "Author badge counts on scenario card?",
+        "Can agent personas (architect/PM) respond to comments in review cycle?"
+      ]
+    },
+    "recentWork": {
+      "authOverhaul": "Commit 63b3bbc hardened plan_share auth: no URL token, HMAC-signed sessions, timing-safe compare, rate limiting, rolling TTL, loopback bypass. Login form captures reviewer name. /api/me endpoint returns authenticated reviewer's name.",
+      "distBundle": "esbuild bundle at plan-harness/local-proxy/dist/index.js; committed; start.js imports directly.",
+      "stableSectionIds": "NOT yet implemented — the HTML templates in local-proxy/src/templates/base.js still emit non-deterministic section IDs. This is the prerequisite to address first in this scenario."
+    },
+    "keyFiles": {
+      "templates": "plan-harness/local-proxy/src/templates/base.js",
+      "webServer": "plan-harness/local-proxy/src/web-server.js",
+      "auth": "plan-harness/local-proxy/src/auth.js",
+      "mcpServer": "plan-harness/local-proxy/src/index.js",
+      "roadmap": "plan-harness/ROADMAP.md"
+    }
+  }
+}
