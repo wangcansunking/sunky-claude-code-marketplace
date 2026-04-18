@@ -396,6 +396,7 @@ kbd {
     <tr><td><code>intent</code></td><td><code>"comment" | "revise"</code></td><td>client</td><td>Default <code>"comment"</code>. <code>"revise"</code> requires host role; rejected 403 otherwise.</td></tr>
     <tr><td><code>reviseStatus</code></td><td><code>"pending" | "dispatched" | "proposed" | "accepted" | "rejected"</code></td><td>server</td><td>Only set when <code>intent === "revise"</code>. Append-only transitions; last event wins on read.</td></tr>
     <tr><td><code>reviseProposalRef</code></td><td>string | null</td><td>server</td><td>Pointer to the agent's diff, e.g. <code>.comments/design.proposals/cmt_a1b2c3.diff</code>. Present once <code>reviseStatus === "proposed"</code>.</td></tr>
+    <tr><td><code>todoResolves</code></td><td>bool (optional)</td><td>client</td><td>Set by the sidebar TODO panel's <em>Resolve</em> action. Host role required; reviewers get 403. The comment's <code>anchor</code> points at the TODO element, so the widget can cross-reference unresolved TODOs on load by matching <code>sectionId + exact</code>. Orthogonal to <code>intent</code> &mdash; a revise comment can also <em>resolve</em> its parent TODO on accept.</td></tr>
   </tbody>
 </table>
 
@@ -884,6 +885,19 @@ data: {}</code></pre>
 </table>
 <p>The widget is injected server-side by <code>/view</code> (same pass as the breadcrumb pill) so it works on every already-written plan doc without regen. Because it reads <code>window.__PLAN_HARNESS_META__</code>, the <code>role</code> field gates any host-only chrome (e.g. a future <em>Jump to pending revises</em> filter toggle). <strong>A panel is fully hidden when its list is empty</strong> &mdash; no button, no empty-state text &mdash; to keep docs without TODOs / comments free of dead chrome.</p>
 
+<h4 id="todo-actions">Per-TODO actions (inline composer)</h4>
+<p>On hover or keyboard-focus, every TODO row in the panel reveals a small action bar at its right edge &mdash; the only first-class way to act on a TODO without leaving the sidebar:</p>
+<table>
+  <thead><tr><th>Icon</th><th>Action</th><th>Who</th><th>POST payload</th><th>Panel effect</th></tr></thead>
+  <tbody>
+    <tr><td>💬</td><td><strong>Reply</strong></td><td>Any authed reader (host or reviewer)</td><td><code>{ anchor, body, intent: "comment" }</code> where <code>anchor.sectionId</code> is the TODO's nearest <code>sec-&lt;hex&gt;</code> ancestor and <code>anchor.exact</code> is the TODO element's normalized textContent (trimmed to 200 chars).</td><td>Comments panel count ticks up; the TODO row shows a small speech-bubble badge with the thread count.</td></tr>
+    <tr><td>✓</td><td><strong>Resolve</strong></td><td>Host only (403 for reviewers)</td><td><code>{ anchor, body, todoResolves: true }</code>. Body defaults to <code>"Resolved."</code> if the host submits without typing anything.</td><td>The TODO row is struck through and moved to a collapsed <em>Resolved</em> subsection inside the panel. On reload, the resolve is rehydrated from the JSONL by matching <code>anchor.sectionId + anchor.exact</code>.</td></tr>
+    <tr><td>🤖</td><td><strong>Ask agent to update</strong></td><td>Host only</td><td><code>{ anchor, body, intent: "revise" }</code>. Body is required (the change request) &mdash; no default.</td><td>TODO row gets a <em>Dispatched</em> chip (passive mode) or <em>Revising&hellip;</em> spinner (active). On <em>accepted</em> event, the comment also carries <code>todoResolves: true</code> so the TODO is auto-resolved.</td></tr>
+  </tbody>
+</table>
+<p>Clicking any icon expands an <strong>inline composer under the TODO row</strong> &mdash; one textarea, a submit button, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to post, <kbd>Esc</kbd> to cancel. No modal, no page navigation. The composer's placeholder and submit label change per action (<em>Reply&hellip;</em> / <em>Note (optional)&hellip;</em> / <em>What should the agent change?</em>). Errors surface inline and do not clear the textarea.</p>
+<p><strong>Anchor-drift behavior:</strong> on doc regeneration, if a TODO's text drifts, its anchor no longer matches the stored resolve comment. The TODO reappears as unresolved (safe default) and the resolve-comment flips to orphaned &mdash; surfaced in the pinned <em>Needs reattachment</em> group so the host can reattach or archive. Aligns with the Comment re-anchor cascade (&sect;4).</p>
+
 <h4 id="todo-format-contract">Recognized TODO markers (contract)</h4>
 <p>The TODOs panel scanner runs on the main-content DOM at <code>DOMContentLoaded</code> and recognizes exactly these three forms. Anything else is ignored. The contract is stable so the writer agent, any future slash command, and external tools can emit TODOs with confidence the panel will surface them.</p>
 <table>
@@ -1205,6 +1219,7 @@ data: {}</code></pre>
     <tr><td>POST <code>intent: "revise"</code></td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span> <em>(no host role)</em></td><td><span class="badge badge-red">401</span></td></tr>
     <tr><td>Dispatch / accept / reject revise</td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span></td><td><span class="badge badge-red">401</span></td></tr>
     <tr><td>Read proposal diff file</td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span></td><td><span class="badge badge-red">401</span></td></tr>
+    <tr><td>POST <code>todoResolves: true</code></td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span> <em>(reviewers can Reply, not Resolve)</em></td><td><span class="badge badge-red">401</span></td></tr>
   </tbody>
 </table>
 <p><strong>Host role</strong> = loopback request OR a session with a server-assigned <code>role: "host"</code> flag. Reviewers never see the Request-update button because <code>/api/me</code> omits the revise capability; they also cannot forge the route &mdash; the server's <code>intent: "revise"</code> branch checks role before appending, independent of what the client sent.</p>
