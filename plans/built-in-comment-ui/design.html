@@ -328,6 +328,8 @@ kbd {
 
 <p>This scenario adds a text-selection commenting layer native to every rendered plan doc. Reviewers select a span, click a floating <strong>Comment</strong> control, and leave a threaded comment attributed to the display name they signed in with. Comments persist as append-only JSONL on the host filesystem using a W3C-style anchor (<code>prefix</code> + <code>exact</code> + <code>suffix</code>) so they survive regeneration. No database, no SaaS, no OAuth &mdash; the same <code>auth.js</code> password gate guards writes.</p>
 
+<p>The <strong>Host / Author</strong> (loopback or host-role session) gets a second action on every comment: <strong>Request update</strong>. Where reviewers' comments are purely a communication channel, an author's revise-intent comment is a directive the plugin can hand back to a Claude Code agent. A per-scenario config (<code>plans/&lt;scenario&gt;/.comment-config.json</code> &rarr; <code>reviseMode: "passive" | "active"</code>, default <em>passive</em>) decides whether the dispatch is deferred (queued for the next <code>/plan-revise</code> run) or fires immediately as a subagent task. This is the author's edit pen; reviewers never see the button.</p>
+
 <h3 id="stakeholders">Stakeholders</h3>
 <ul>
   <li><strong>Host / Author</strong> &mdash; runs plan-harness locally, gets a durable, attributed backlog tied to exact sentences.</li>
@@ -391,6 +393,9 @@ kbd {
     <tr><td><code>deleted</code></td><td>bool</td><td>server</td><td>Soft-delete. Body replaced with <code>"[deleted]"</code> on read.</td></tr>
     <tr><td><code>deletedBy</code></td><td>string</td><td>server</td><td></td></tr>
     <tr><td><code>editedAt</code></td><td>ISO-8601 UTC</td><td>server</td><td>Set when an edit event is appended.</td></tr>
+    <tr><td><code>intent</code></td><td><code>"comment" | "revise"</code></td><td>client</td><td>Default <code>"comment"</code>. <code>"revise"</code> requires host role; rejected 403 otherwise.</td></tr>
+    <tr><td><code>reviseStatus</code></td><td><code>"pending" | "dispatched" | "proposed" | "accepted" | "rejected"</code></td><td>server</td><td>Only set when <code>intent === "revise"</code>. Append-only transitions; last event wins on read.</td></tr>
+    <tr><td><code>reviseProposalRef</code></td><td>string | null</td><td>server</td><td>Pointer to the agent's diff, e.g. <code>.comments/design.proposals/cmt_a1b2c3.diff</code>. Present once <code>reviseStatus === "proposed"</code>.</td></tr>
   </tbody>
 </table>
 
@@ -410,12 +415,15 @@ kbd {
 <h3 id="data-storage">Storage Layout</h3>
 <pre><code>plans/
   &lt;scenario-name&gt;/
+    .comment-config.json     # { "reviseMode": "passive" | "active" } &mdash; default "passive"
     .comments/
       design.jsonl           # one event per line, append-only
       test-plan.jsonl
       state-machine.jsonl
+      design.proposals/      # agent-generated revise proposals
+        cmt_a1b2c3.diff      # unified diff the author reviews before accepting
       ...</code></pre>
-<p>The leading-dot directory matches the existing <code>.plan-context.json</code> convention. Manifest impact: <strong>none</strong> &mdash; counts are surfaced via the API at read time.</p>
+<p>The leading-dot directory matches the existing <code>.plan-context.json</code> convention. Manifest impact: <strong>none</strong> &mdash; counts are surfaced via the API at read time. <code>.comment-config.json</code> is optional; its absence means passive revise mode.</p>
 
 <h3 id="data-section-id">Section ID Algorithm</h3>
 <table>
@@ -759,15 +767,36 @@ kbd {
     <span class="badge badge-gray">auth</span>
     <span class="badge badge-yellow">rate-limited</span>
   </div>
-  <div class="endpoint-desc">Create a new comment or reply.</div>
+  <div class="endpoint-desc">Create a new comment or reply. If <code>intent === "revise"</code>, server verifies host role (loopback OR <code>role: host</code> session); rejects <code>403</code> otherwise. On <code>active</code> revise mode, server also posts to the MCP dispatcher and flips <code>reviseStatus: "dispatched"</code> before returning 201.</div>
   <p><strong>Request body</strong></p>
 <pre><code>{
   "anchor": { "sectionId": "sec-4f3a...", "exact": "...", "prefix": "...", "suffix": "..." },
   "body": "plain text, 1-4000 chars",
+  "intent": "comment" | "revise",    // default "comment"; "revise" host-only
   "threadId": null,
   "replyTo": null
 }</code></pre>
-  <p><strong>Response 201</strong> &mdash; full stored <code>Comment</code> object. <code>author</code>, <code>id</code>, <code>createdAt</code> are server-stamped.</p>
+  <p><strong>Response 201</strong> &mdash; full stored <code>Comment</code> object. <code>author</code>, <code>id</code>, <code>createdAt</code>, <code>reviseStatus</code> are server-stamped.</p>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-head">
+    <span class="http http-post">POST</span>
+    <span class="endpoint-path">/api/comments/:scenario/:doc/:id/revise-dispatch</span>
+    <span class="badge badge-red">host-only</span>
+  </div>
+  <div class="endpoint-desc">Manually dispatch a pending revise comment to the agent (used under <code>reviseMode: "passive"</code> &mdash; e.g. when the author triggers <code>/plan-revise</code>, or clicks <em>Dispatch</em> on a pending card). Appends <code>reviseStatus: "dispatched"</code>. The <code>/plan-revise</code> skill reads <code>reviseStatus === "pending"</code> comments and calls this route.</div>
+  <p><strong>Response 202</strong> &mdash; dispatch accepted; proposal will appear asynchronously via SSE.</p>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-head">
+    <span class="http http-post">POST</span>
+    <span class="endpoint-path">/api/comments/:scenario/:doc/:id/revise-accept</span>
+    <span class="badge badge-red">host-only</span>
+  </div>
+  <div class="endpoint-desc">Author accepts the agent's proposal. Server applies the diff in <code>reviseProposalRef</code> to the doc, appends <code>reviseStatus: "accepted"</code>, and flips the parent comment's <code>resolved: true</code>. <code>revise-reject</code> is the sibling route that appends <code>"rejected"</code> without touching the doc.</div>
+  <p><strong>Response 200</strong> &mdash; patched doc path + final <code>Comment</code>.</p>
 </div>
 
 <div class="endpoint">
@@ -844,6 +873,18 @@ data: {}</code></pre>
 
 <p><strong>Why a side panel over a modal or inline bubble?</strong> Threads get long; modals trap focus and block re-reading the doc; inline bubbles clip at section boundaries and fight embedded charts. A non-modal slide-over lets the reviewer re-check context while writing. Below 720&nbsp;px, the panel becomes a bottom sheet.</p>
 
+<h3 id="ux-author-actions">Author Composer: Two Actions</h3>
+<p>When <code>/api/me</code> returns <code>role: "host"</code> (loopback, or a session flagged host by the server), the composer's submit row shows <strong>two</strong> primary buttons instead of one:</p>
+<table>
+  <thead><tr><th>Button</th><th>Shortcut</th><th>Intent</th><th>What happens</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Reply</strong> (default, left)</td><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td><code>"comment"</code></td><td>Normal threaded comment &mdash; same flow as reviewers. Used to clarify, ask, nudge a teammate or an agent.</td></tr>
+    <tr><td><strong>Request update</strong> (right, subtle accent)</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd></td><td><code>"revise"</code></td><td>POST with <code>intent: "revise"</code>. Under <code>reviseMode: "active"</code>, a subagent is dispatched immediately and a "Revising&hellip;" spinner appears on the card. Under <code>"passive"</code> (default), the card shows a <em>Pending dispatch</em> chip and waits for the next <code>/plan-revise</code> run (or a manual <em>Dispatch</em> click).</td></tr>
+  </tbody>
+</table>
+<p>The two buttons sit in a single action row with a <strong>subtle visual hierarchy</strong>: Reply is the solid primary button; Request update is outlined with the accent color and a <code>↻</code> icon. A hover tooltip on Request update previews the effective mode &mdash; <em>"Will dispatch on next /plan-revise"</em> vs <em>"Will dispatch now"</em> &mdash; read from the cached <code>.comment-config.json</code>.</p>
+<p>On a revise comment's card, the author later sees a <strong>Proposal ready</strong> banner with three actions: <em>View diff</em> (renders the proposal in a modal overlay), <em>Accept</em> (applies + resolves), <em>Reject</em> (keeps the doc, appends a rejection event). Reviewers see only the public body of the comment; the proposal UI is author-only.</p>
+
 <h3 id="ux-components">Component Inventory</h3>
 <table>
   <thead><tr><th>Component</th><th>Location</th><th>Purpose</th><th>Key a11y</th></tr></thead>
@@ -857,6 +898,9 @@ data: {}</code></pre>
     <tr><td>Sticky doc pill</td><td>Top-right of main content</td><td><em>N unresolved</em> toggle for side panel.</td><td>Live region updates when count changes.</td></tr>
     <tr><td>Empty-state card</td><td>Side panel first load</td><td>"No comments yet. Select any text to leave the first."</td><td>First-select tooltip is dismissible and <kbd>Esc</kbd>-closable.</td></tr>
     <tr><td>Offline banner</td><td>Top of side panel</td><td>"You're offline. Drafts saved locally."</td><td><code>role="status" aria-live="polite"</code>.</td></tr>
+    <tr><td>Author action pair</td><td>Composer submit row (host only)</td><td><em>Reply</em> + <em>Request update</em> buttons; mode-aware tooltip.</td><td>Both <code>button type="submit"</code>; <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> announced in composer <code>aria-describedby</code>.</td></tr>
+    <tr><td>Revise status chip</td><td>Top of a revise-intent thread card</td><td>Badge: <em>Pending</em> / <em>Dispatched</em> / <em>Proposal ready</em> / <em>Accepted</em> / <em>Rejected</em>.</td><td>Color-coded + icon; SR text reads full status not just color.</td></tr>
+    <tr><td>Proposal review pane</td><td>Modal overlay (host only, opened from chip)</td><td>Unified diff viewer with <em>Accept</em> / <em>Reject</em>; preview of resulting doc section.</td><td><code>role="dialog" aria-modal="true"</code>; focus trapped while open; <kbd>Esc</kbd> closes.</td></tr>
   </tbody>
 </table>
 
@@ -988,6 +1032,44 @@ data: {}</code></pre>
   </div>
 </details>
 
+<details>
+  <summary>UC-13 &mdash; Author requests an agent-driven revise (passive mode) <span class="badge badge-blue">MVP</span></summary>
+  <div class="body">
+    <p><strong>Actor:</strong> Host/Author (loopback or host-role session). <strong>Pre:</strong> <code>.comment-config.json</code> absent or <code>reviseMode: "passive"</code>.</p>
+    <ol>
+      <li>Author selects a span, opens the composer &mdash; two buttons visible.</li>
+      <li>Types body (e.g. <em>"Data model section conflates anchor and section id; please split"</em>).</li>
+      <li>Clicks <strong>Request update</strong> (or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>).</li>
+      <li>POST with <code>intent: "revise"</code> &rarr; server verifies host role &rarr; appends JSONL with <code>reviseStatus: "pending"</code>.</li>
+      <li>UI renders a thread card with a <strong>Pending dispatch</strong> chip + <em>Dispatch now</em> button.</li>
+      <li>Later, author runs <code>/plan-revise &lt;scenario&gt;</code>. The skill reads all <code>reviseStatus === "pending"</code> comments, calls <code>revise-dispatch</code> per comment (flipping to <code>dispatched</code>), and hands each off to the writer subagent with context <code>{ anchor, exact, body }</code>.</li>
+    </ol>
+    <p><strong>Alt:</strong> 5a. Author clicks <em>Dispatch now</em> on the card &rarr; same <code>revise-dispatch</code> route, bypassing the batched skill. <strong>Post:</strong> one JSONL line per state transition; proposal arrives in UC-15.</p>
+  </div>
+</details>
+
+<details>
+  <summary>UC-14 &mdash; Author requests an agent-driven revise (active mode) <span class="badge badge-yellow">P1</span></summary>
+  <div class="body">
+    <p><strong>Actor:</strong> Host/Author. <strong>Pre:</strong> <code>.comment-config.json</code> &rarr; <code>reviseMode: "active"</code>.</p>
+    <p>Identical to UC-13 steps 1&ndash;4, except step 4 additionally triggers the dispatcher synchronously: server enqueues an agent job before returning <code>201</code>, and the card renders a <strong>Revising&hellip;</strong> spinner from the start. SSE pushes the state transitions to open tabs. <strong>Abuse guard:</strong> at most <strong>3 concurrent active revises per scenario</strong>; excess requests fall back to <em>pending</em> with a banner <em>"Queue full &mdash; will auto-dispatch when a slot frees"</em>. <strong>Post:</strong> identical end state as UC-13; only the latency profile differs.</p>
+  </div>
+</details>
+
+<details>
+  <summary>UC-15 &mdash; Author reviews and accepts / rejects a proposal <span class="badge badge-blue">MVP</span></summary>
+  <div class="body">
+    <p><strong>Actor:</strong> Host/Author. <strong>Trigger:</strong> writer agent completes a revise task and writes <code>.comments/&lt;doc&gt;.proposals/&lt;cmtId&gt;.diff</code>; server appends <code>reviseStatus: "proposed"</code> event and emits SSE.</p>
+    <ol>
+      <li>Card chip flips to <strong>Proposal ready</strong> with a notification toast.</li>
+      <li>Author clicks <em>View diff</em> &rarr; modal overlay shows the unified diff + a live preview of the resulting section.</li>
+      <li>Author clicks <em>Accept</em> &rarr; server applies the diff, appends <code>reviseStatus: "accepted"</code>, flips <code>resolved: true</code>, SSE broadcasts.</li>
+      <li>Alt: <em>Reject</em> &rarr; appends <code>"rejected"</code>; doc untouched; card stays open so author can follow up in a reply.</li>
+    </ol>
+    <p><strong>Safety:</strong> if the target span no longer matches the anchor (doc drifted since proposal), the server refuses to apply and downgrades the comment to <em>orphaned</em> with the proposal preserved for manual re-application. <strong>Post:</strong> doc mutated at most once per proposal; all states durable in JSONL.</p>
+  </div>
+</details>
+
 <h3 id="ac-list">Acceptance Criteria</h3>
 <table>
   <thead><tr><th>ID</th><th>Priority</th><th>Given / When / Then</th></tr></thead>
@@ -1049,8 +1131,24 @@ data: {}</code></pre>
 <div class="phase">
   <div class="phase-num">5</div>
   <div class="phase-body">
+    <div class="phase-title">Revise Intent + Agent Dispatcher <span class="badge badge-yellow">Medium complexity</span></div>
+    <div class="phase-desc">Extend POST to accept <code>intent</code>; add host-role check; add <code>revise-dispatch</code> and <code>revise-accept</code> / <code>revise-reject</code> routes; read <code>.comment-config.json</code> on start-up (+ hot-reload on mtime). Add an MCP tool <code>plan_revise</code> that lists pending revise comments and hands each off to a writer subagent using the existing prompt scaffold. Dispatcher writes proposals to <code>.comments/&lt;doc&gt;.proposals/&lt;cmtId&gt;.diff</code> and appends transition events. Concurrency cap (3 active per scenario) with a token-bucket; <code>passive</code> batches, <code>active</code> fires immediately. Files: <code>src/comment-manager.js</code> (append), <code>src/revise-dispatcher.js</code> (new), <code>src/web-server.js</code>, <code>src/index.js</code>, skills: <code>skills/plan-revise/SKILL.md</code>.</div>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase-num">6</div>
+  <div class="phase-body">
+    <div class="phase-title">Proposal Review UI <span class="badge badge-yellow">Medium complexity</span></div>
+    <div class="phase-desc">Add the revise chip to thread cards; Proposal modal with a minimal inline unified-diff viewer (no monaco &mdash; keep zero-dep invariant); <em>Accept</em> / <em>Reject</em> actions; anchor-drift guard before apply. All author-gated by the same role check that shows the two-button composer.</div>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase-num">7</div>
+  <div class="phase-body">
     <div class="phase-title">Hardening + Self-Dev Loop <span class="badge badge-yellow">Medium complexity</span></div>
-    <div class="phase-desc"><code>npm run dev</code>; regenerate <code>built-in-comment-ui/design.html</code>; smoke-test loopback create &rarr; JSONL + SSE + sidebar; smoke-test regen + reanchor; verify widget does not break existing interactivity.</div>
+    <div class="phase-desc"><code>npm run dev</code>; regenerate <code>built-in-comment-ui/design.html</code>; smoke-test loopback create &rarr; JSONL + SSE + sidebar; smoke-test regen + reanchor; smoke-test revise in both modes end-to-end (author leaves revise &rarr; dispatched &rarr; proposed &rarr; accepted &rarr; doc updated); verify widget does not break existing interactivity.</div>
   </div>
 </div>
 
@@ -1058,10 +1156,12 @@ data: {}</code></pre>
 <table>
   <thead><tr><th>File</th><th>Change</th><th>Purpose</th></tr></thead>
   <tbody>
-    <tr><td><code>plan-harness/local-proxy/src/comment-manager.js</code></td><td><span class="badge badge-green">new</span></td><td>JSONL CRUD, re-anchor, rate limiter, SSE registry.</td></tr>
-    <tr><td><code>plan-harness/local-proxy/src/web-server.js</code></td><td><span class="badge badge-yellow">modified</span></td><td>5 comment routes + 1 SSE route in <code>handleRequest</code>; imports comment-manager.</td></tr>
-    <tr><td><code>plan-harness/local-proxy/src/templates/base.js</code></td><td><span class="badge badge-yellow">modified</span></td><td>Section-id helper; meta tag; inline widget CSS + JS.</td></tr>
-    <tr><td><code>plan-harness/local-proxy/src/index.js</code></td><td><span class="badge badge-yellow">modified</span></td><td>Register <code>plan_reanchor</code> MCP tool.</td></tr>
+    <tr><td><code>plan-harness/local-proxy/src/comment-manager.js</code></td><td><span class="badge badge-green">new</span></td><td>JSONL CRUD, re-anchor, rate limiter, SSE registry, revise state transitions.</td></tr>
+    <tr><td><code>plan-harness/local-proxy/src/revise-dispatcher.js</code></td><td><span class="badge badge-green">new</span></td><td>Reads <code>.comment-config.json</code>; routes revise intents to passive queue or active subagent; concurrency cap; proposal file writer.</td></tr>
+    <tr><td><code>plan-harness/local-proxy/src/web-server.js</code></td><td><span class="badge badge-yellow">modified</span></td><td>5 comment routes + 1 SSE route + 3 revise routes (<code>dispatch</code>, <code>accept</code>, <code>reject</code>) in <code>handleRequest</code>.</td></tr>
+    <tr><td><code>plan-harness/local-proxy/src/templates/base.js</code></td><td><span class="badge badge-yellow">modified</span></td><td>Section-id helper; meta tag; inline widget CSS + JS including author-only action pair and proposal modal.</td></tr>
+    <tr><td><code>plan-harness/local-proxy/src/index.js</code></td><td><span class="badge badge-yellow">modified</span></td><td>Register <code>plan_reanchor</code> and <code>plan_revise</code> MCP tools.</td></tr>
+    <tr><td><code>plan-harness/skills/plan-revise/SKILL.md</code></td><td><span class="badge badge-green">new</span></td><td>New slash command: batches pending revise comments and dispatches them to the writer agent. Used under passive mode.</td></tr>
   </tbody>
 </table>
 
@@ -1078,8 +1178,12 @@ data: {}</code></pre>
     <tr><td>PATCH resolved <span class="badge badge-purple">Open</span></td><td><span class="badge badge-green">Yes (any)</span></td><td><span class="badge badge-green">Yes (any)</span> <em>[Architect]</em> / <span class="badge badge-red">No</span> <em>[PM]</em></td><td><span class="badge badge-red">401</span></td></tr>
     <tr><td>DELETE</td><td><span class="badge badge-green">Yes (any)</span></td><td><span class="badge badge-yellow">Own only</span></td><td><span class="badge badge-red">401</span></td></tr>
     <tr><td>SSE stream</td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">401</span></td></tr>
+    <tr><td>POST <code>intent: "revise"</code></td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span> <em>(no host role)</em></td><td><span class="badge badge-red">401</span></td></tr>
+    <tr><td>Dispatch / accept / reject revise</td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span></td><td><span class="badge badge-red">401</span></td></tr>
+    <tr><td>Read proposal diff file</td><td><span class="badge badge-green">Yes</span></td><td><span class="badge badge-red">403</span></td><td><span class="badge badge-red">401</span></td></tr>
   </tbody>
 </table>
+<p><strong>Host role</strong> = loopback request OR a session with a server-assigned <code>role: "host"</code> flag. Reviewers never see the Request-update button because <code>/api/me</code> omits the revise capability; they also cannot forge the route &mdash; the server's <code>intent: "revise"</code> branch checks role before appending, independent of what the client sent.</p>
 
 <h3 id="sec-csrf">CSRF Posture</h3>
 <div class="callout callout-decision">
