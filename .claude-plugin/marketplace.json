@@ -9,7 +9,7 @@
     {
       "name": "plan-harness",
       "description": "Structured project planning with agent teams — generates interconnected design docs, test plans, state machines, test cases, and implementation plans as interactive HTML. 11 skills, 6 MCP tools, 6 agent roles.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "source": "./plan-harness",
       "icon": "./plan-harness/assets/icon.png",
       "category": "planning",
@@ -25,7 +25,7 @@
     {
       "name": "claude-config-manager",
       "description": "Dashboard & CLI for managing Claude Code configurations — profiles, export/import, MCP store, plugin marketplace, sessions viewer. 9 MCP tools, web dashboard, real-time sync.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "source": {
         "source": "url",
         "url": "https://github.com/wangcansunking/claude-config-manager.git"
